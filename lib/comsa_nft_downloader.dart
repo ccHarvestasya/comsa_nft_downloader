@@ -1,4 +1,9 @@
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:symbol_ddk/infra/statistics_service_http.dart';
+import 'package:symbol_ddk/model/comsa_nft/comsa_nft_info_detail.dart';
+import 'package:symbol_ddk/util/comsa_nft.dart';
 
 Future main() async {
   final server = await HttpServer.bind('localhost', 8080);
@@ -9,30 +14,55 @@ Future main() async {
   }
 }
 
-void handleRequest(HttpRequest request) {
+Future<void> handleRequest(HttpRequest request) async {
   print('Received request: ${request.method} ${request.uri.path}');
 
   try {
-    // クエリパラメータ取得
-    String? mosaicId = request.uri.queryParameters['mosaicId'];
-
-    if (mosaicId == null || mosaicId.isEmpty) {
-      throw Exception('mosaicIdが指定されていません');
+    if (request.uri.path != '/') {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write("notFound")
+        ..close();
+      return;
     }
 
-    StatisticsServiceHttp ssHttp = StatisticsServiceHttp();
-    await ssHttp.init();
+    // クエリパラメータ取得
+    String? mosaicId = request.uri.queryParameters['mosaicId'];
+    if (mosaicId == null || mosaicId.isEmpty) {
+      request.response
+        ..statusCode = HttpStatus.badRequest
+        ..write("error")
+        ..close();
+      return;
+    }
 
-    ComsaNft comsaNft = ComsaNft();
-    Uint8List nftData = await comsaNft.decoder(mosaicId: mosaicId);
-    ComsaNftInfoDetail comsaNftInfoDetail = comsaNft.comsaNftInfoDetail!;
+    try {
+      // StatisticsServices初期化
+      StatisticsServiceHttp ssHttp = StatisticsServiceHttp();
+      await ssHttp.init();
+      // ComsaNFTデコード
+      ComsaNft comsaNft = ComsaNft();
+      Uint8List nftData = await comsaNft.decoder(mosaicId: mosaicId);
+      ComsaNftInfoDetail comsaNftInfoDetail = comsaNft.comsaNftInfoDetail!;
 
+      // コンテンツタイプ
+      List<String> contentType = comsaNftInfoDetail.mimeType.split('/');
+      String primaryType = contentType[0];
+      String subType = contentType[1];
+      print('$primaryType/$subType');
 
-
-    request.response
-      ..headers.contentType = ContentType('text', 'plain', charset: 'utf-8')
-      ..write('Hello, World!')
-      ..close();
+      // HTTPレスポンス
+      request.response
+        ..headers.contentType = ContentType(primaryType, subType)
+        ..add(nftData)
+        ..close();
+    } catch (e) {
+      print(e);
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write("notFound")
+        ..close();
+    }
   } catch (e) {
     print(e);
     request.response
